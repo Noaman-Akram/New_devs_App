@@ -28,11 +28,11 @@ The async database-session configuration was corrected so the revenue service us
 
 ### Sunset Properties
 
-<img src="docs/screenshots/sunset-dashboard.jpg" alt="Sunset Properties dashboard showing USD 2,250.00 and four bookings" width="700">
+![Sunset Properties dashboard showing USD 2,250.00 and four bookings](./docs/screenshots/sunset-dashboard.jpg)
 
 ### Ocean Rentals after refresh
 
-<img src="docs/screenshots/ocean-dashboard.jpg" alt="Ocean Rentals dashboard showing isolated revenue after refresh" width="700">
+![Ocean Rentals dashboard showing isolated revenue after refresh](./docs/screenshots/ocean-dashboard.jpg)
 
 ## Video walkthrough
 
