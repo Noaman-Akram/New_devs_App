@@ -38,4 +38,4 @@ The dashboard now preserves the authenticated tenant ID, so each client’s prop
 
 ## Video walkthrough
 
-Loom: _Add link before submission._
+Loom: [Watch the walkthrough](https://www.loom.com/share/b03c5412650a4aff94b22e33ca1f5e5d)
