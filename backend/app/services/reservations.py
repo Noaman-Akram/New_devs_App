@@ -1,21 +1,39 @@
-from datetime import datetime
-from decimal import Decimal
+from datetime import datetime, timezone as dt_timezone
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Any, List
+from zoneinfo import ZoneInfo
 
-async def calculate_monthly_revenue(property_id: str, month: int, year: int, db_session=None) -> Decimal:
+async def calculate_monthly_revenue(
+    property_id: str,
+    month: int,
+    year: int,
+    db_session=None,
+    *,
+    tenant_id: str,
+    property_timezone: str = "UTC",
+) -> Decimal:
     """
     Calculates revenue for a specific month.
     """
 
-    start_date = datetime(year, month, 1)
+    if not tenant_id:
+        raise ValueError("tenant_id is required for revenue calculations")
+    try:
+        tz = ZoneInfo(property_timezone)
+    except Exception as exc:
+        raise ValueError(f"Invalid property timezone: {property_timezone}") from exc
+
+    # Convert local calendar boundaries to UTC instants before querying the
+    # timestamptz column.  This correctly handles DST and reservations that
+    # cross midnight in the property's local timezone.
+    start_date = datetime(year, month, 1, tzinfo=tz).astimezone(dt_timezone.utc)
     if month < 12:
-        end_date = datetime(year, month + 1, 1)
+        end_date = datetime(year, month + 1, 1, tzinfo=tz).astimezone(dt_timezone.utc)
     else:
-        end_date = datetime(year + 1, 1, 1)
+        end_date = datetime(year + 1, 1, 1, tzinfo=tz).astimezone(dt_timezone.utc)
         
     print(f"DEBUG: Querying revenue for {property_id} from {start_date} to {end_date}")
 
-    # SQL Simulation (This would be executed against the actual DB)
     query = """
         SELECT SUM(total_amount) as total
         FROM reservations
@@ -25,16 +43,29 @@ async def calculate_monthly_revenue(property_id: str, month: int, year: int, db_
         AND check_in_date < $4
     """
     
-    # In production this query executes against a database session.
-    # result = await db.fetch_val(query, property_id, tenant_id, start_date, end_date)
-    # return result or Decimal('0')
-    
-    return Decimal('0') # Placeholder for now until DB connection is finalized
+    if db_session is None:
+        raise ValueError("db_session is required for monthly revenue calculations")
+
+    # Support asyncpg-style sessions and SQLAlchemy AsyncSession.
+    if hasattr(db_session, "fetchval"):
+        total = await db_session.fetchval(query, property_id, tenant_id, start_date, end_date)
+    else:
+        from sqlalchemy import text
+        result = await db_session.execute(
+            text(query.replace("$1", ":property_id").replace("$2", ":tenant_id").replace("$3", ":start_date").replace("$4", ":end_date")),
+            {"property_id": property_id, "tenant_id": tenant_id, "start_date": start_date, "end_date": end_date},
+        )
+        row = result.fetchone()
+        total = row[0] if row else None
+
+    return (Decimal(str(total)) if total is not None else Decimal("0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 async def calculate_total_revenue(property_id: str, tenant_id: str) -> Dict[str, Any]:
     """
     Aggregates revenue from database.
     """
+    if not tenant_id:
+        raise ValueError("tenant_id is required for revenue calculations")
     try:
         # Import database pool
         from app.core.database_pool import DatabasePool
@@ -65,7 +96,7 @@ async def calculate_total_revenue(property_id: str, tenant_id: str) -> Dict[str,
                 row = result.fetchone()
                 
                 if row:
-                    total_revenue = Decimal(str(row.total_revenue))
+                    total_revenue = Decimal(str(row.total_revenue or "0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     return {
                         "property_id": property_id,
                         "tenant_id": tenant_id,
@@ -88,22 +119,12 @@ async def calculate_total_revenue(property_id: str, tenant_id: str) -> Dict[str,
     except Exception as e:
         print(f"Database error for {property_id} (tenant: {tenant_id}): {e}")
         
-        # Create property-specific mock data for testing when DB is unavailable
-        # This ensures each property shows different figures
-        mock_data = {
-            'prop-001': {'total': '1000.00', 'count': 3},
-            'prop-002': {'total': '4975.50', 'count': 4}, 
-            'prop-003': {'total': '6100.50', 'count': 2},
-            'prop-004': {'total': '1776.50', 'count': 4},
-            'prop-005': {'total': '3256.00', 'count': 3}
-        }
-        
-        mock_property_data = mock_data.get(property_id, {'total': '0.00', 'count': 0})
-        
+        # Do not return fabricated values on a database failure: a plausible
+        # number from another tenant is a privacy and accuracy incident.
         return {
             "property_id": property_id,
             "tenant_id": tenant_id, 
-            "total": mock_property_data['total'],
+            "total": "0.00",
             "currency": "USD",
-            "count": mock_property_data['count']
+            "count": 0
         }
